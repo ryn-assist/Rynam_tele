@@ -15,6 +15,16 @@ function looksLikeUrl(value) {
   }
 }
 
+function describeApiResult(result) {
+  if (!result || typeof result !== 'object') return '';
+  const parts = [];
+  if (result.message) parts.push(`Pesan API: ${result.message}`);
+  if (result.error) parts.push(`Error API: ${result.error}`);
+  if (result.code) parts.push(`Code: ${result.code}`);
+  if (result.status === false) parts.push('Status API: false');
+  return parts.length ? `\n\n${parts.join('\n')}` : '';
+}
+
 export function registerPremium(bot) {
   bot.command('premium', async (ctx) => {
     const email = ctx.message.text.split(/\s+/).slice(1).join(' ').trim();
@@ -26,10 +36,13 @@ export function registerPremium(bot) {
     try {
       await ctx.reply('⏳ Memproses permintaan verifikasi...');
       const result = await sendVerification(email);
-      pending.set(ctx.from.id, email);
 
-      const status = result?.status === false ? '⚠️ API menolak permintaan.' : '✅ Permintaan dikirim.';
-      return ctx.reply(`${status}\n\n📧 Email: ${email}\n\nKirim link verifikasi yang kamu terima ke chat ini.\n\nKetik /cancel untuk membatalkan.`);
+      if (result?.status === false) {
+        return ctx.reply(`❌ API menolak permintaan.${describeApiResult(result)}`);
+      }
+
+      pending.set(ctx.from.id, email);
+      return ctx.reply(`✅ Permintaan dikirim.\n\n📧 Email: ${email}\n\nKirim link verifikasi yang kamu terima ke chat ini.\n\nKetik /cancel untuk membatalkan.`);
     } catch (error) {
       return ctx.reply(`❌ Gagal: ${error.message}`);
     }
@@ -45,21 +58,24 @@ export function registerPremium(bot) {
     const text = ctx.message.text.trim();
 
     if (!email || text.startsWith('/')) return next();
-    if (!looksLikeUrl(text)) return ctx.reply('Kirim link verifikasi yang valid, atau /cancel untuk membatalkan.');
+    if (!looksLikeUrl(text)) {
+      return ctx.reply('Kirim link verifikasi yang valid, atau /cancel untuk membatalkan.');
+    }
 
     try {
       await ctx.reply('⏳ Memverifikasi link...');
       const result = await verifyLink(email, text);
 
-      pending.delete(ctx.from.id);
       if (result?.status === false || result?.premium === false) {
-        return ctx.reply('❌ Verifikasi gagal. Periksa link lalu coba lagi dengan /premium.');
+        // Keep the pending email so the user can retry with another link.
+        return ctx.reply(`❌ Verifikasi gagal. Coba kirim ulang link yang diterima.${describeApiResult(result)}\n\n📧 Email: ${email}\nKetik /cancel untuk membatalkan.`);
       }
 
+      pending.delete(ctx.from.id);
       const duration = result?.duration || 'Tidak diketahui';
       return ctx.reply(`✅ Verifikasi berhasil!\n\n📧 Email: ${result?.email || email}\n⭐ Premium: ${result?.premium === true ? 'Aktif' : 'Berhasil diproses'}\n⏱ Durasi: ${duration}`);
     } catch (error) {
-      return ctx.reply(`❌ Verifikasi gagal: ${error.message}`);
+      return ctx.reply(`❌ Verifikasi gagal: ${error.message}\n\n📧 Email: ${email}\nCoba kirim link lagi atau /cancel.`);
     }
   });
 }
